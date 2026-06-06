@@ -233,6 +233,11 @@ class AudioController(private val context: Context) {
                 player.pause()
             }
 
+            if (player.playbackState == Player.STATE_BUFFERING) {
+                _latencyCorrectionEvents.value = "Buffering... waiting to sync"
+                return
+            }
+
             // Calculate drift offset (delta between Local and Host)
             val localPos = player.currentPosition
             val drift = targetPositionMs - localPos
@@ -240,21 +245,23 @@ class AudioController(private val context: Context) {
 
             // Apply fine-tuned NTP adjustments 
             when {
-                // Scenario A: Massive drift (> 180ms) -> Trigger instant Seek to realign
-                Math.abs(drift) > 180 -> {
+                // Scenario A: Massive drift (> 1200ms) -> Trigger instant Seek to realign
+                Math.abs(drift) > 1200 -> {
                     player.seekTo(targetPositionMs)
                     _latencyCorrectionEvents.value = "Seek alignment: Adjusted ${drift}ms"
                 }
 
-                // Scenario B: Minor drift (30ms to 180ms) -> Micro speed correction!
-                // Changes speed slightly (e.g. 0.98x or 1.02x) so pitch/tempo aligns organically
+                // Scenario B: Minor drift (30ms to 1200ms) -> Micro speed correction!
+                // Changes speed slightly (e.g. 0.98x or 1.05x) so pitch/tempo aligns organically
                 drift > 30 -> {
-                    player.setPlaybackSpeed(1.02f)
-                    _latencyCorrectionEvents.value = "Micro-Correction: Speeding up playback (1.02x)"
+                    val speed = if (drift > 400) 1.05f else 1.02f
+                    player.setPlaybackSpeed(speed)
+                    _latencyCorrectionEvents.value = "Micro-Correction: Speeding up playback (${speed}x)"
                 }
                 drift < -30 -> {
-                    player.setPlaybackSpeed(0.98f)
-                    _latencyCorrectionEvents.value = "Micro-Correction: Slowing down playback (0.98x)"
+                    val speed = if (drift < -400) 0.95f else 0.98f
+                    player.setPlaybackSpeed(speed)
+                    _latencyCorrectionEvents.value = "Micro-Correction: Slowing down playback (${speed}x)"
                 }
 
                 // Scenario C: Perfect sync bounds (< 30ms) -> Restore normal playback rate

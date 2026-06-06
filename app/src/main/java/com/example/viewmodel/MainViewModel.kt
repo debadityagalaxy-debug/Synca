@@ -142,7 +142,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Host publishing loop runs every 500ms to broadcast the playback cursor precisely
+    // Host publishing loop runs periodically to combat clock drift
     private fun startHostPublishing() {
         hostPublishJob?.cancel()
         hostPublishJob = viewModelScope.launch {
@@ -157,7 +157,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         payload = "$playState|$trackIdx|$pos"
                     ))
                 }
-                delay(600)
+                delay(1500)
             }
         }
     }
@@ -273,7 +273,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun broadcastStateUpdate() {
         val playState = isPlaying.value
         val trackIdx = currentTrackIndex.value
-        val pos = currentPosition.value
+        val pos = audioController.getExactPosition()
         bluetoothService.broadcastMessage(SyncMessage(
             type = SyncMessage.TYPE_PLAY_STATE,
             payload = "$playState|$trackIdx|$pos"

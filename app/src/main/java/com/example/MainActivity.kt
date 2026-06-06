@@ -241,7 +241,7 @@ fun MainDashboard(viewModel: MainViewModel) {
                         activeRoom = activeRoom,
                         onStartHost = { name, pwd ->
                             val discoverableIntent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
-                                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+                                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 3600)
                             }
                             try {
                                 context.startActivity(discoverableIntent)

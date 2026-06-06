@@ -49,8 +49,6 @@ fun RoomScreen(
     discoveredRooms: List<SyncRoomInfo>,
     connectedMembers: List<RoomMember>,
     activeRoom: SyncRoomInfo?,
-    isDemoMode: Boolean,
-    onSetDemoMode: (Boolean) -> Unit,
     onStartHost: (String, String) -> Unit,
     onJoinRoom: (SyncRoomInfo, String) -> Unit,
     onApproveMember: (String) -> Unit,
@@ -67,10 +65,6 @@ fun RoomScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Mode Header Selector
-        item {
-            DemoModeSelector(isDemoMode = isDemoMode, onToggle = onSetDemoMode)
-        }
 
         if (userRole == UserRole.NONE && !isHostingSetup) {
             // Main Join options
@@ -142,7 +136,7 @@ fun RoomScreen(
 
             if (discoveredRooms.isEmpty()) {
                 item {
-                    val message = if (isDemoMode) "Press 'Find Rooms' to list simulated channels." else "No Bluetooth streams detected. Confirm dynamic permissions are enabled."
+                    val message = "No Bluetooth streams detected. Confirm dynamic permissions are enabled."
                     EmptyRoomsState(message)
                 }
             } else {
@@ -176,51 +170,6 @@ fun RoomScreen(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun DemoModeSelector(isDemoMode: Boolean, onToggle: (Boolean) -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (isDemoMode) "Simulator Mode Active" else "Physical Bluetooth Engaged",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = if (isDemoMode) NeonPink else NeonMint
-                )
-                Text(
-                    text = if (isDemoMode) "Testing network with realistic sync telemetry on virtual sandbox." else "Using hardware Bluetooth Classic logic.",
-                    fontSize = 11.sp,
-                    color = if (isSystemInDarkTheme()) TextSecondaryDark else TextSecondaryLight
-                )
-            }
-            Switch(
-                checked = isDemoMode,
-                onCheckedChange = onToggle,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = NeonPink,
-                    checkedTrackColor = NeonPink.copy(alpha = 0.4f),
-                    uncheckedThumbColor = NeonPurple,
-                    uncheckedTrackColor = NeonPurple.copy(alpha = 0.2f)
-                ),
-                modifier = Modifier.testTag("demo_mode_switch")
-            )
         }
     }
 }

@@ -3,7 +3,6 @@ package com.example.connectivity
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.content.Context
@@ -30,8 +29,8 @@ class BluetoothService(private val context: Context) {
     private val TAG = "SyncRoom_BTService"
     private val APP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") // Standard Serial Port Profile SPP UUID
 
-    private val bluetoothManager: BluetoothManager? = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
+    private val hardwareManager = BluetoothManager(context)
+    private val bluetoothAdapter: BluetoothAdapter? = hardwareManager.bluetoothAdapter
 
     // State flows
     private val _connectionState = MutableStateFlow(ConnectionState.IDLE)
@@ -52,9 +51,6 @@ class BluetoothService(private val context: Context) {
     private val _activeRoom = MutableStateFlow<SyncRoomInfo?>(null)
     val activeRoom: StateFlow<SyncRoomInfo?> = _activeRoom.asStateFlow()
 
-    private val _isDemoMode = MutableStateFlow(true) // Start with demo mode true so it functions out-of-the-box on emulator!
-    val isDemoMode: StateFlow<Boolean> = _isDemoMode.asStateFlow()
-
     // Threads
     private var acceptThread: AcceptThread? = null
     private var connectThread: ConnectThread? = null
@@ -63,74 +59,36 @@ class BluetoothService(private val context: Context) {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
-        // If Bluetooth is supported and enabled, we can allow true Bluetooth toggling, 
-        // but default on emulator is DemoMode so they get a working interface right away.
-        _isDemoMode.value = bluetoothAdapter == null || !bluetoothAdapter.isEnabled
-        if (_isDemoMode.value) {
-            setupDemoModeDiscoveredRooms()
-        }
-    }
-
-    fun setDemoMode(enabled: Boolean) {
-        _isDemoMode.value = enabled
-        if (enabled) {
-            closeAllRealConnections()
-            setupDemoModeDiscoveredRooms()
-            Log.d(TAG, "Switched to DEMO/SIMULATOR mode.")
-        } else {
-            _discoveredRooms.value = emptyList()
-            _activeRoom.value = null
-            _connectionState.value = ConnectionState.IDLE
-            _role.value = UserRole.NONE
-            _connectedMembers.value = emptyList()
-            Log.d(TAG, "Switched to TRUE BLUETOOTH mode.")
-        }
-    }
-
-    private fun setupDemoModeDiscoveredRooms() {
+        // Collect hardware discovered devices and map them to our Room abstraction
         serviceScope.launch {
-            _discoveredRooms.value = listOf(
-                SyncRoomInfo(id = "101", name = "Future Funk Studio", hostName = "CosmoHost", requiresPassword = false, memberCount = 3),
-                SyncRoomInfo(id = "202", name = "Chill Lofi Lounge", hostName = "PixelMaster", requiresPassword = true, password = "1234", memberCount = 1),
-                SyncRoomInfo(id = "303", name = "HyperPop Pulse", hostName = "SlayGurl", requiresPassword = false, memberCount = 4),
-                SyncRoomInfo(id = "404", name = "Vinyl Beats Vault", hostName = "DiskJockey", requiresPassword = true, password = "9999", memberCount = 0)
-            )
+            hardwareManager.discoveredDevices.collect { devices ->
+                _discoveredRooms.value = devices.map { dev ->
+                    SyncRoomInfo(
+                        id = dev.macAddress,
+                        name = dev.name,
+                        hostName = "Device",
+                        requiresPassword = false,
+                        password = "",
+                        memberCount = 1
+                    )
+                }
+            }
+        }
+        
+        serviceScope.launch {
+            hardwareManager.connectionState.collect { state ->
+                // Sync scanning state
+                if (state == ConnectionState.SCANNING) {
+                    _connectionState.value = ConnectionState.SCANNING
+                } else if (_connectionState.value == ConnectionState.SCANNING) {
+                    _connectionState.value = ConnectionState.IDLE
+                }
+            }
         }
     }
 
     // Start room hosting
     fun startHostRoom(roomName: String, password: String = "") {
-        if (_isDemoMode.value) {
-            _role.value = UserRole.HOST
-            _connectionState.value = ConnectionState.CONNECTED
-            val mockRoom = SyncRoomInfo(
-                id = "demo_host_room",
-                name = roomName,
-                hostName = Build.MODEL,
-                requiresPassword = password.isNotEmpty(),
-                password = password,
-                memberCount = 0
-            )
-            _activeRoom.value = mockRoom
-            _connectedMembers.value = listOf(
-                RoomMember("host_id", Build.MODEL, isApproved = true, isHost = true)
-            )
-
-            // Simulate incoming guests automatically in demo mode!
-            serviceScope.launch {
-                delay(4000)
-                if (_role.value == UserRole.HOST) {
-                    addDemoMember("BeatNik", 42L)
-                }
-                delay(5000)
-                if (_role.value == UserRole.HOST) {
-                    addDemoMember("GrooveMachine", 58L)
-                }
-            }
-            return
-        }
-
-        // True Bluetooth hosting protocol
         if (bluetoothAdapter == null) return
         closeAllRealConnections()
 
@@ -146,26 +104,6 @@ class BluetoothService(private val context: Context) {
 
         acceptThread = AcceptThread(roomName)
         acceptThread?.start()
-    }
-
-    private fun addDemoMember(name: String, latency: Long) {
-        val current = _connectedMembers.value.toMutableList()
-        val newMember = RoomMember(
-            id = "demo_member_${current.size}",
-            name = name,
-            isApproved = false, // starts unapproved for Host Approval Feature!
-            latencyMs = latency
-        )
-        current.add(newMember)
-        _connectedMembers.value = current
-
-        // Auto announce new guest joining request for Host action list
-        serviceScope.launch {
-            _incomingMessages.emit(SyncMessage(
-                type = SyncMessage.TYPE_JOIN_REQUEST,
-                payload = "${newMember.id}|$name"
-            ))
-        }
     }
 
     fun approveMember(memberId: String) {
@@ -192,31 +130,10 @@ class BluetoothService(private val context: Context) {
 
     // Join room
     fun joinRoom(room: SyncRoomInfo, providedPassword: String = "") {
-        if (_isDemoMode.value) {
-            if (room.requiresPassword && room.password != providedPassword) {
-                Log.e(TAG, "Demo Room password incorrect")
-                return
-            }
-            _role.value = UserRole.MEMBER
-            _connectionState.value = ConnectionState.CONNECTING
-            _activeRoom.value = room
-
-            serviceScope.launch {
-                delay(1500) // Simulate fast pairing sequence
-                _connectionState.value = ConnectionState.CONNECTED
-                val host = RoomMember("host_id", room.hostName, isApproved = true, isHost = true)
-                val me = RoomMember("my_id", Build.MODEL, isApproved = true, isHost = false, latencyMs = 18L)
-                _connectedMembers.value = listOf(host, me)
-
-                // Start simulated synchronization flow
-                startDemoSyncPingLoop()
-            }
-            return
-        }
-
-        // True Bluetooth Connection protocol
         if (bluetoothAdapter == null) return
         closeAllRealConnections()
+
+        hardwareManager.stopDiscovery()
 
         _role.value = UserRole.MEMBER
         _connectionState.value = ConnectionState.CONNECTING
@@ -227,30 +144,8 @@ class BluetoothService(private val context: Context) {
         connectThread?.start()
     }
 
-    private fun startDemoSyncPingLoop() {
-        serviceScope.launch {
-            while (_role.value == UserRole.MEMBER && _connectionState.value == ConnectionState.CONNECTED) {
-                delay(3000)
-                // Emit automatic sync updates in demo mode
-                _activeRoom.value = _activeRoom.value?.copy(
-                    pingMs = (10..35).random().toLong(),
-                    clockOffsetMs = (-3..3).random().toLong()
-                )
-            }
-        }
-    }
-
     // Shutdown structures cleanly
     fun disconnect() {
-        if (_isDemoMode.value) {
-            _role.value = UserRole.NONE
-            _connectionState.value = ConnectionState.IDLE
-            _activeRoom.value = null
-            _connectedMembers.value = emptyList()
-            setupDemoModeDiscoveredRooms()
-            return
-        }
-
         closeAllRealConnections()
         _role.value = UserRole.NONE
         _connectionState.value = ConnectionState.IDLE
@@ -276,14 +171,6 @@ class BluetoothService(private val context: Context) {
     // Messaging pipeline
     fun broadcastMessage(message: SyncMessage) {
         val dataStr = "${message.type}|${message.timestamp}|${message.payload}\n"
-        if (_isDemoMode.value) {
-            // Emulate sending by piping straight to loop
-            serviceScope.launch {
-                _incomingMessages.emit(message)
-            }
-            return
-        }
-
         synchronized(activeConnections) {
             activeConnections.forEach { clientThread ->
                 clientThread.write(dataStr.toByteArray())
@@ -292,29 +179,11 @@ class BluetoothService(private val context: Context) {
     }
 
     fun startDiscovery() {
-        if (_isDemoMode.value) {
-            setupDemoModeDiscoveredRooms()
-            _connectionState.value = ConnectionState.SCANNING
-            return
-        }
-
-        if (bluetoothAdapter == null) return
-        if (bluetoothAdapter.isDiscovering) {
-            bluetoothAdapter.cancelDiscovery()
-        }
-        bluetoothAdapter.startDiscovery()
-        _connectionState.value = ConnectionState.SCANNING
+        hardwareManager.startDiscovery()
     }
 
     fun stopDiscovery() {
-        if (_isDemoMode.value) {
-            _connectionState.value = ConnectionState.IDLE
-            return
-        }
-        if (bluetoothAdapter?.isDiscovering == true) {
-            bluetoothAdapter.cancelDiscovery()
-        }
-        _connectionState.value = ConnectionState.IDLE
+        hardwareManager.stopDiscovery()
     }
 
     // --- AcceptThread: Server Socket Listener ---

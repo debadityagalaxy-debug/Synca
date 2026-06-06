@@ -82,7 +82,6 @@ fun MainDashboard(viewModel: MainViewModel) {
     val connectedMembers by viewModel.connectedMembers.collectAsStateWithLifecycle()
     val discoveredRooms by viewModel.discoveredRooms.collectAsStateWithLifecycle()
     val activeRoom by viewModel.activeRoom.collectAsStateWithLifecycle()
-    val isDemoMode by viewModel.isDemoMode.collectAsStateWithLifecycle()
 
     // Permissions orchestration
     var hasPermissions by remember { mutableStateOf(false) }
@@ -206,8 +205,7 @@ fun MainDashboard(viewModel: MainViewModel) {
             TopAppBarWidget(
                 userRole = userRole,
                 state = connectionState,
-                room = activeRoom,
-                isDemo = isDemoMode
+                room = activeRoom
             )
 
             // Permissions alert header if blocked
@@ -238,8 +236,6 @@ fun MainDashboard(viewModel: MainViewModel) {
                         discoveredRooms = discoveredRooms,
                         connectedMembers = connectedMembers,
                         activeRoom = activeRoom,
-                        isDemoMode = isDemoMode,
-                        onSetDemoMode = { viewModel.bluetoothService.setDemoMode(it) },
                         onStartHost = { name, pwd -> viewModel.startHosting(name, pwd) },
                         onJoinRoom = { room, pwd -> viewModel.joinSelectedRoom(room, pwd) },
                         onApproveMember = { viewModel.bluetoothService.approveMember(it) },
@@ -294,8 +290,7 @@ fun MainDashboard(viewModel: MainViewModel) {
 fun TopAppBarWidget(
     userRole: UserRole,
     state: ConnectionState,
-    room: SyncRoomInfo?,
-    isDemo: Boolean
+    room: SyncRoomInfo?
 ) {
     Row(
         modifier = Modifier
@@ -308,7 +303,6 @@ fun TopAppBarWidget(
             // Elegant upper uppercase indicator
             val upperIndicatorText = when {
                 userRole != UserRole.NONE && state == ConnectionState.CONNECTED -> "Room Active"
-                isDemo -> "Sandbox Simulation"
                 else -> "Transmitters Ready"
             }
             Text(

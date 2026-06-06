@@ -46,7 +46,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val connectedMembers: StateFlow<List<RoomMember>> = bluetoothService.connectedMembers
     val discoveredRooms: StateFlow<List<SyncRoomInfo>> = bluetoothService.discoveredRooms
     val activeRoom: StateFlow<SyncRoomInfo?> = bluetoothService.activeRoom
-    val isDemoMode: StateFlow<Boolean> = bluetoothService.isDemoMode
 
     // Player forwarding
     val isPlaying: StateFlow<Boolean> = audioController.isPlaying

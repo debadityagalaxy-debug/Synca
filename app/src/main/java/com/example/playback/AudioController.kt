@@ -116,9 +116,11 @@ class AudioController(private val context: Context) {
                 // Check if it's a real file URI or high-quality synthesized stream/asset sample URL
                 val mediaUri = if (track.isCustom && track.path.startsWith("content://")) {
                     Uri.parse(track.path)
+                } else if (track.path.startsWith("http")) {
+                    Uri.parse(track.path)
                 } else {
-                    // Preloaded web streams for pristine demo sound synchronization out-of-the-box!
-                    Uri.parse("asset:///sample.mp3") // fallback or pre-configured asset url
+                    // For demo purposes, playing a reliable remote mp3 file instead of missing local asset
+                    Uri.parse("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3") 
                 }
                 
                 // Generate item config
@@ -218,6 +220,9 @@ class AudioController(private val context: Context) {
             if (player.currentMediaItemIndex != trackIndex && trackIndex in playlist.indices) {
                 player.seekTo(trackIndex, targetPositionMs)
                 _latencyCorrectionEvents.value = "Aligned track index -> $trackIndex"
+                if (peerIsPlaying && !player.isPlaying) {
+                    player.play()
+                }
                 return
             }
 
@@ -259,6 +264,10 @@ class AudioController(private val context: Context) {
                 }
             }
         }
+    }
+
+    fun getExactPosition(): Long {
+        return exoPlayer?.currentPosition ?: _currentPosition.value
     }
 
     private fun startProgressTracker() {

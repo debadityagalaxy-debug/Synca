@@ -78,6 +78,7 @@ fun MainDashboard(viewModel: MainViewModel) {
     val volume by viewModel.volume.collectAsStateWithLifecycle()
     val activeSyncedDriftMs by viewModel.activeSyncedDriftMs.collectAsStateWithLifecycle()
     val latencyCorrectionEvents by viewModel.latencyCorrectionEvents.collectAsStateWithLifecycle()
+    val manualLatencyOffset by viewModel.manualLatencyOffset.collectAsStateWithLifecycle()
 
     val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
     val userRole by viewModel.userRole.collectAsStateWithLifecycle()
@@ -268,6 +269,8 @@ fun MainDashboard(viewModel: MainViewModel) {
                         isHost = userRole == UserRole.HOST,
                         activeSyncedDriftMs = activeSyncedDriftMs,
                         latencyCorrectionEvents = latencyCorrectionEvents,
+                        manualLatencyOffset = manualLatencyOffset,
+                        onManualLatencyOffsetChange = { viewModel.updateManualLatencyOffset(it) },
                         onTogglePlay = { viewModel.togglePlay() },
                         onNext = { viewModel.triggerNext() },
                         onPrevious = { viewModel.triggerPrevious() },

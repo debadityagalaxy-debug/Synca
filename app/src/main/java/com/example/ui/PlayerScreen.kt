@@ -45,6 +45,8 @@ fun PlayerScreen(
     isHost: Boolean,
     activeSyncedDriftMs: Long,
     latencyCorrectionEvents: String,
+    manualLatencyOffset: Long,
+    onManualLatencyOffsetChange: (Long) -> Unit,
     onTogglePlay: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
@@ -271,6 +273,51 @@ fun PlayerScreen(
                     fontSize = 11.sp,
                     color = if (isSystemInDarkTheme()) TextSecondaryDark else TextSecondaryLight
                 )
+
+                if (!isHost) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Manual Latency Calibration (ms)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "-500",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                        )
+                        Slider(
+                            value = manualLatencyOffset.toFloat(),
+                            onValueChange = { onManualLatencyOffsetChange(it.toLong()) },
+                            valueRange = -500f..500f,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp)
+                                .testTag("latency_slider"),
+                            colors = SliderDefaults.colors(
+                                thumbColor = NeonPurple,
+                                activeTrackColor = NeonPurple
+                            )
+                        )
+                        Text(
+                            text = "+500",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                        )
+                    }
+                    Text(
+                        text = "Offset: ${manualLatencyOffset}ms",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = NeonPurple,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
             }
         }
     }

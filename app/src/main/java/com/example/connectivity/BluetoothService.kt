@@ -190,7 +190,7 @@ class BluetoothService(private val context: Context) {
     // --- AcceptThread: Server Socket Listener ---
     private inner class AcceptThread(roomName: String) : Thread() {
         private val mmServerSocket: BluetoothServerSocket? by lazy(LazyThreadSafetyMode.NONE) {
-            bluetoothAdapter?.listenUsingRfcommWithServiceRecord(roomName, APP_UUID)
+            bluetoothAdapter?.listenUsingInsecureRfcommWithServiceRecord(roomName, APP_UUID)
         }
 
         override fun run() {
@@ -221,7 +221,7 @@ class BluetoothService(private val context: Context) {
     // --- ConnectThread: Client Connection ---
     private inner class ConnectThread(private val device: BluetoothDevice) : Thread() {
         private val mmSocket: BluetoothSocket? by lazy(LazyThreadSafetyMode.NONE) {
-            device.createRfcommSocketToServiceRecord(APP_UUID)
+            device.createInsecureRfcommSocketToServiceRecord(APP_UUID)
         }
 
         override fun run() {
@@ -269,7 +269,7 @@ class BluetoothService(private val context: Context) {
                 val current = _connectedMembers.value.toMutableList()
                 val isDuplicate = current.any { it.id == deviceId }
                 if (!isDuplicate) {
-                    val newMember = RoomMember(deviceId, deviceName, isApproved = false, latencyMs = 24L)
+                    val newMember = RoomMember(deviceId, deviceName, isApproved = true, latencyMs = 24L)
                     current.add(newMember)
                     _connectedMembers.value = current
                     _incomingMessages.emit(SyncMessage(SyncMessage.TYPE_JOIN_REQUEST, payload = "$deviceId|$deviceName"))

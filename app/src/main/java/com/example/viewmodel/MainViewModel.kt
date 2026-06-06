@@ -58,6 +58,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val activeSyncedDriftMs: StateFlow<Long> = audioController.activeSyncedDriftMs
     val latencyCorrectionEvents: StateFlow<String> = audioController.latencyCorrectionEvents
 
+    private val _manualLatencyOffset = MutableStateFlow(0L)
+    val manualLatencyOffset: StateFlow<Long> = _manualLatencyOffset.asStateFlow()
+
+    fun updateManualLatencyOffset(offset: Long) {
+        _manualLatencyOffset.value = offset
+    }
+
     private var hostPublishJob: Job? = null
     private var syncMessageCollectionJob: Job? = null
 
@@ -72,10 +79,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.allTracks.collectLatest { list ->
                 if (list.isEmpty()) {
                     val defaults = listOf(
-                        Track(title = "Neon Dusk City", artist = "Vector Cyber", duration = 184000, path = "asset:///neon_dusk.mp3"),
-                        Track(title = "Starlight Cruise", artist = "Retro Driver", duration = 210000, path = "asset:///starlight.mp3"),
-                        Track(title = "8-Bit Arcade Jump", artist = "Pixel Pulse", duration = 152000, path = "asset:///pixel_pulse.mp3"),
-                        Track(title = "Sub-Zero Horizon", artist = "Synth Shaman", duration = 239000, path = "asset:///horizon.mp3")
+                        Track(title = "SoundHelix Song 1", artist = "T. Schürger", duration = 372000, path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"),
+                        Track(title = "SoundHelix Song 2", artist = "T. Schürger", duration = 425000, path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"),
+                        Track(title = "SoundHelix Song 3", artist = "T. Schürger", duration = 345000, path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"),
+                        Track(title = "SoundHelix Song 4", artist = "T. Schürger", duration = 302000, path = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3")
                     )
                     repository.insertTracks(defaults)
                 }
@@ -107,8 +114,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 val trackIndex = parts[1].toInt()
                                 val positionMs = parts[2].toLong()
 
-                                // Capture latency and NTP shift
-                                val transmissionLatency = (System.currentTimeMillis() - msg.timestamp).coerceAtLeast(0)
+                                // Capture latency using an estimated bluetooth delay since raw system clocks differ
+                                val transmissionLatency = 50L + _manualLatencyOffset.value
                                 audioController.alignPlayback(
                                     peerIsPlaying = isPlayingVal,
                                     trackIndex = trackIndex,
@@ -143,7 +150,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (userRole.value == UserRole.HOST) {
                     val playState = isPlaying.value
                     val trackIdx = currentTrackIndex.value
-                    val pos = currentPosition.value
+                    val pos = audioController.getExactPosition()
                     
                     bluetoothService.broadcastMessage(SyncMessage(
                         type = SyncMessage.TYPE_PLAY_STATE,

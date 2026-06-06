@@ -27,6 +27,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -62,6 +63,7 @@ fun RoomScreen(
 ) {
     var isHostingSetup by remember { mutableStateOf(false) }
     var isJoiningById by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LazyColumn(
         modifier = modifier
@@ -131,19 +133,52 @@ fun RoomScreen(
             }
 
             item {
-                OutlinedButton(
-                    onClick = { isJoiningById = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.secondary
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Icon(Icons.Filled.Cable, contentDescription = "Direct")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Direct Connect (MAC Address)", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    OutlinedButton(
+                        onClick = { isJoiningById = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Icon(Icons.Filled.Cable, contentDescription = "Direct")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("MAC Address", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val scanner = com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(context)
+                            scanner.startScan().addOnSuccessListener { barcode ->
+                                val rawValue = barcode.rawValue
+                                if (rawValue != null && rawValue.startsWith("syncroom://")) {
+                                    val parts = rawValue.removePrefix("syncroom://").split("/")
+                                    if (parts.isNotEmpty()) {
+                                        val id = parts[0]
+                                        val pwd = if (parts.size > 1) parts[1] else ""
+                                        onJoinRoomById(id, pwd)
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Icon(Icons.Filled.QrCodeScanner, contentDescription = "Scan QR")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Scan QR", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
                 }
             }
 
@@ -601,51 +636,53 @@ fun ActiveRoomPanel(
 
 @Composable
 fun SyncQRCodeWidget(room: SyncRoomInfo, modifier: Modifier = Modifier) {
-    // Elegant Custom Canvas design representing connection barcode
-    Canvas(
-        modifier = modifier
-            .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-            .background(Color.White, RoundedCornerShape(12.dp))
-            .padding(10.dp)
-    ) {
-        val sizeVal = size.width
-        val blockCount = 8
-        val blockSize = sizeVal / blockCount
-
-        // 1. Draw corner anchor position boxes (standard styling for secure pairing)
-        val strokeWidth = 5f
-        // Top-Left anchor
-        drawRect(Color.Black, Offset(0f, 0f), Size(blockSize * 2, blockSize * 2), style = Stroke(strokeWidth))
-        drawRect(Color.Black, Offset(blockSize * 0.5f, blockSize * 0.5f), Size(blockSize, blockSize))
-
-        // Top-Right anchor
-        drawRect(Color.Black, Offset(sizeVal - (blockSize * 2), 0f), Size(blockSize * 2, blockSize * 2), style = Stroke(strokeWidth))
-        drawRect(Color.Black, Offset(sizeVal - (blockSize * 1.5f), blockSize * 0.5f), Size(blockSize, blockSize))
-
-        // Bottom-Left anchor
-        drawRect(Color.Black, Offset(0f, sizeVal - (blockSize * 2)), Size(blockSize * 2, blockSize * 2), style = Stroke(strokeWidth))
-        drawRect(Color.Black, Offset(blockSize * 0.5f, sizeVal - (blockSize * 1.5f)), Size(blockSize, blockSize))
-
-        // 2. Draw mock sync data payload pixels inside (seeded by room name to look dynamic!)
-        val seed = room.name.hashCode()
-        for (row in 0 until blockCount) {
-            for (col in 0 until blockCount) {
-                // Avoid anchor overlap boundaries
-                if (row <= 2 && col <= 2) continue
-                if (row <= 2 && col >= blockCount - 3) continue
-                if (row >= blockCount - 3 && col <= 2) continue
-
-                // Pseudo-random distribution based on hash code representation
-                val active = (seed xor (row * 33) xor (col * 49)) % 2 == 0
-                if (active) {
-                    drawRect(
-                        color = if ((row + col) % 3 == 0) NeonPurple else Color.Black,
-                        topLeft = Offset(col * blockSize, row * blockSize),
-                        size = Size(blockSize - 1, blockSize - 1)
-                    )
+    var qrBitmap by remember(room.id, room.password) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    
+    LaunchedEffect(room.id, room.password) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val payload = "syncroom://${room.id}/${room.password}"
+            val size = 512
+            try {
+                val bitMatrix = com.google.zxing.qrcode.QRCodeWriter().encode(
+                    payload,
+                    com.google.zxing.BarcodeFormat.QR_CODE,
+                    size,
+                    size
+                )
+                val width = bitMatrix.width
+                val height = bitMatrix.height
+                val bmp = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                val pixels = IntArray(width * height)
+                for (y in 0 until height) {
+                    val offset = y * width
+                    for (x in 0 until width) {
+                        pixels[offset + x] = if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                    }
                 }
+                bmp.setPixels(pixels, 0, width, 0, 0, width, height)
+                qrBitmap = bmp.asImageBitmap()
+            } catch (e: Exception) {
+               e.printStackTrace()
             }
         }
+    }
+
+    if (qrBitmap != null) {
+        androidx.compose.foundation.Image(
+            bitmap = qrBitmap!!,
+            contentDescription = "Room QR Code",
+            modifier = modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White)
+                .padding(4.dp)
+                .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+        )
+    } else {
+        Box(
+            modifier = modifier
+                .border(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                .background(Color.White, RoundedCornerShape(12.dp))
+        )
     }
 }
 

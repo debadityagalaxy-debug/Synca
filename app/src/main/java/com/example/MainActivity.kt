@@ -1,6 +1,8 @@
 package com.example
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -236,7 +238,18 @@ fun MainDashboard(viewModel: MainViewModel) {
                         discoveredRooms = discoveredRooms,
                         connectedMembers = connectedMembers,
                         activeRoom = activeRoom,
-                        onStartHost = { name, pwd -> viewModel.startHosting(name, pwd) },
+                        onStartHost = { name, pwd ->
+                            val discoverableIntent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
+                                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+                            }
+                            try {
+                                context.startActivity(discoverableIntent)
+                            } catch (e: Exception) {
+                                // Ignore if intent fails
+                            }
+                            viewModel.startHosting(name, pwd)
+                        },
+                        onJoinRoomById = { id, pwd -> viewModel.joinRoomById(id, pwd) },
                         onJoinRoom = { room, pwd -> viewModel.joinSelectedRoom(room, pwd) },
                         onApproveMember = { viewModel.bluetoothService.approveMember(it) },
                         onRejectMember = { viewModel.bluetoothService.rejectMember(it) },

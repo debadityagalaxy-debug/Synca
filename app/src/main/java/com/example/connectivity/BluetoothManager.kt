@@ -199,7 +199,7 @@ class BluetoothManager(private val context: Context) {
             if (bluetoothAdapter.isDiscovering) {
                 bluetoothAdapter.cancelDiscovery()
             }
-            _discoveredDevices.value = emptyList()
+            _discoveredDevices.value = getPairedDevices() // Show paired immediately
             val success = bluetoothAdapter.startDiscovery()
             _isScanning.value = success
             if (success) {

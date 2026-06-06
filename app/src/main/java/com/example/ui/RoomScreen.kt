@@ -1,5 +1,6 @@
 package com.example.ui
 
+import android.content.Intent
 import android.os.Build
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -27,6 +28,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -50,6 +52,7 @@ fun RoomScreen(
     connectedMembers: List<RoomMember>,
     activeRoom: SyncRoomInfo?,
     onStartHost: (String, String) -> Unit,
+    onJoinRoomById: (String, String) -> Unit,
     onJoinRoom: (SyncRoomInfo, String) -> Unit,
     onApproveMember: (String) -> Unit,
     onRejectMember: (String) -> Unit,
@@ -58,6 +61,7 @@ fun RoomScreen(
     modifier: Modifier = Modifier
 ) {
     var isHostingSetup by remember { mutableStateOf(false) }
+    var isJoiningById by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -66,7 +70,7 @@ fun RoomScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
 
-        if (userRole == UserRole.NONE && !isHostingSetup) {
+        if (userRole == UserRole.NONE && !isHostingSetup && !isJoiningById) {
             // Main Join options
             item {
                 Text(
@@ -121,8 +125,25 @@ fun RoomScreen(
                             contentDescription = "Scan"
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Find Rooms", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                        Text("Scan", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                     }
+                }
+            }
+
+            item {
+                OutlinedButton(
+                    onClick = { isJoiningById = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.secondary
+                    )
+                ) {
+                    Icon(Icons.Filled.Cable, contentDescription = "Direct")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Direct Connect (MAC Address)", fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                 }
             }
 
@@ -152,6 +173,16 @@ fun RoomScreen(
                     onHostCreate = { name, pwd ->
                         onStartHost(name, pwd)
                         isHostingSetup = false
+                    }
+                )
+            }
+        } else if (isJoiningById && userRole == UserRole.NONE) {
+            item {
+                JoinByIdForm(
+                    onBack = { isJoiningById = false },
+                    onJoin = { deviceId, pwd ->
+                        onJoinRoomById(deviceId, pwd)
+                        isJoiningById = false
                     }
                 )
             }
@@ -425,6 +456,7 @@ fun ActiveRoomPanel(
     onRejectMember: (String) -> Unit,
     onDisconnect: () -> Unit
 ) {
+    val context = LocalContext.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -506,6 +538,27 @@ fun ActiveRoomPanel(
                             Icon(Icons.Filled.Key, "Pass", tint = NeonPink, modifier = Modifier.size(12.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Room Password: ${room.password}", fontSize = 11.sp, color = NeonPink, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    if (role == UserRole.HOST) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val shareText = "Join my SyncRoom!\nRoom ID (MAC): ${room.id}\n" +
+                                    (if (room.requiresPassword) "Password: ${room.password}\n" else "")
+                                val intent = Intent().apply {
+                                    action = Intent.ACTION_SEND
+                                    putExtra(Intent.EXTRA_TEXT, shareText)
+                                    type = "text/plain"
+                                }
+                                context.startActivity(Intent.createChooser(intent, "Share Room Details"))
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.defaultMinSize(minHeight = 1.dp)
+                        ) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share", modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Share Room Details", fontSize = 10.sp)
                         }
                     }
                 }
@@ -658,6 +711,86 @@ fun MemberRow(member: RoomMember) {
                     fontWeight = FontWeight.SemiBold,
                     color = NeonMint
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun JoinByIdForm(onBack: () -> Unit, onJoin: (String, String) -> Unit) {
+    var macAddress by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Direct Connect",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close")
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            
+            Text("Enter Host Device ID or MAC Address", fontSize = 13.sp, color = if (isSystemInDarkTheme()) TextSecondaryDark else TextSecondaryLight)
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text("Host Identifier (MAC)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedTextField(
+                value = macAddress,
+                onValueChange = { macAddress = it },
+                singleLine = true,
+                placeholder = { Text("00:11:22:33:FF:EE") },
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().testTag("direct_mac_input"),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonPurple)
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Text("Access Password (Optional)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                singleLine = true,
+                placeholder = { Text("None") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
+                shape = RoundedCornerShape(10.dp),
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().testTag("direct_password_input"),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = NeonPurple)
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Button(
+                onClick = {
+                    if (macAddress.isNotEmpty()) {
+                        onJoin(macAddress, password)
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("direct_join_confirm_btn"),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = NeonPurple)
+            ) {
+                Text("Join Target Host", fontWeight = FontWeight.Bold)
             }
         }
     }

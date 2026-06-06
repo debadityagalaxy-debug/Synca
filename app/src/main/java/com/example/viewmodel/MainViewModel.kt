@@ -170,6 +170,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bluetoothService.joinRoom(room, password)
     }
 
+    fun joinRoomById(deviceId: String, password: String = "") {
+        val synthezisedRoom = SyncRoomInfo(
+            id = deviceId,
+            name = "Direct Connection",
+            hostName = "Direct Host",
+            requiresPassword = password.isNotEmpty(),
+            password = password
+        )
+        bluetoothService.joinRoom(synthezisedRoom, password)
+    }
+
     fun exitRoom() {
         bluetoothService.disconnect()
         stopHostPublishing()

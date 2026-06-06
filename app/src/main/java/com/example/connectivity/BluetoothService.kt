@@ -59,13 +59,14 @@ class BluetoothService(private val context: Context) {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
-        // Collect hardware discovered devices and map them to our Room abstraction
+        // Collect hardware discovered and paired devices and map them to our Room abstraction
         serviceScope.launch {
             hardwareManager.discoveredDevices.collect { devices ->
-                _discoveredRooms.value = devices.map { dev ->
+                val allDevices = (hardwareManager.getPairedDevices() + devices).distinctBy { it.macAddress }
+                _discoveredRooms.value = allDevices.map { dev ->
                     SyncRoomInfo(
                         id = dev.macAddress,
-                        name = dev.name,
+                        name = "${dev.name} (${if (dev.bondState == BluetoothDevice.BOND_BONDED) "Paired" else "Discovered"})",
                         hostName = "Device",
                         requiresPassword = false,
                         password = "",

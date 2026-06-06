@@ -1,0 +1,6 @@
+{
+  "name": "SyncRoom",
+  "description": "High-fidelity synchronized Bluetooth music room. Connect multiple devices to play your music perfectly in sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

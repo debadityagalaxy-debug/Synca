@@ -1,7 +1,6 @@
 package com.example
 
 import android.Manifest
-import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -89,12 +88,7 @@ fun MainDashboard(viewModel: MainViewModel) {
     // Permissions orchestration
     var hasPermissions by remember { mutableStateOf(false) }
     val requiredPermissions = remember {
-        val permissions = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-            permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
-        }
+        val permissions = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
         } else {
@@ -221,7 +215,7 @@ fun MainDashboard(viewModel: MainViewModel) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Bluetooth, location, and storage permissions required for local broadcast pairing.",
+                        text = "Storage permissions required to read audio files.",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.Red,
@@ -240,22 +234,14 @@ fun MainDashboard(viewModel: MainViewModel) {
                         connectedMembers = connectedMembers,
                         activeRoom = activeRoom,
                         onStartHost = { name, pwd ->
-                            val discoverableIntent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
-                                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 3600)
-                            }
-                            try {
-                                context.startActivity(discoverableIntent)
-                            } catch (e: Exception) {
-                                // Ignore if intent fails
-                            }
                             viewModel.startHosting(name, pwd)
                         },
                         onJoinRoomById = { id, pwd -> viewModel.joinRoomById(id, pwd) },
                         onJoinRoom = { room, pwd -> viewModel.joinSelectedRoom(room, pwd) },
-                        onApproveMember = { viewModel.bluetoothService.approveMember(it) },
-                        onRejectMember = { viewModel.bluetoothService.rejectMember(it) },
+                        onApproveMember = { viewModel.wifiService.approveMember(it) },
+                        onRejectMember = { viewModel.wifiService.rejectMember(it) },
                         onDisconnect = { viewModel.exitRoom() },
-                        onStartScan = { viewModel.bluetoothService.startDiscovery() }
+                        onStartScan = { viewModel.wifiService.startDiscovery() }
                     )
 
                     1 -> PlayerScreen(
@@ -284,6 +270,7 @@ fun MainDashboard(viewModel: MainViewModel) {
                         tracks = tracks,
                         currentTrackIndex = currentTrackIndex,
                         isPlaying = isPlaying,
+                        userRole = userRole,
                         onNavigateToTrack = { index ->
                             viewModel.audioController.seekTo(0)
                             viewModel.audioController.setPlaylist(tracks)

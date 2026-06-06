@@ -115,6 +115,7 @@ fun PlayerScreen(
             Slider(
                 value = if (duration > 0) currentPosition.toFloat() else 0f,
                 onValueChange = { onSeek(it.toLong()) },
+                enabled = isHost,
                 valueRange = 0f..(if (duration > 0) duration.toFloat() else 100f),
                 colors = SliderDefaults.colors(
                     thumbColor = NeonPink,
@@ -151,6 +152,7 @@ fun PlayerScreen(
         ) {
             IconButton(
                 onClick = onToggleShuffle,
+                enabled = isHost,
                 modifier = Modifier.size(38.dp)
             ) {
                 Icon(
@@ -162,6 +164,7 @@ fun PlayerScreen(
 
             IconButton(
                 onClick = onPrevious,
+                enabled = isHost,
                 modifier = Modifier.size(46.dp)
             ) {
                 Icon(Icons.Filled.SkipPrevious, "Previous", modifier = Modifier.size(28.dp))
@@ -173,7 +176,7 @@ fun PlayerScreen(
                     .size(68.dp)
                     .clip(CircleShape)
                     .background(Brush.radialGradient(listOf(NeonPurple, NeonPink)))
-                    .clickable { onTogglePlay() }
+                    .clickable(enabled = isHost) { onTogglePlay() }
                     .border(2.dp, Color.White.copy(alpha = 0.35f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
@@ -187,6 +190,7 @@ fun PlayerScreen(
 
             IconButton(
                 onClick = onNext,
+                enabled = isHost,
                 modifier = Modifier.size(46.dp)
             ) {
                 Icon(Icons.Filled.SkipNext, "Next", modifier = Modifier.size(28.dp))
@@ -194,6 +198,7 @@ fun PlayerScreen(
 
             IconButton(
                 onClick = onToggleRepeat,
+                enabled = isHost,
                 modifier = Modifier.size(38.dp)
             ) {
                 Icon(
@@ -220,6 +225,7 @@ fun PlayerScreen(
             Slider(
                 value = volume,
                 onValueChange = onVolumeChange,
+                enabled = isHost,
                 modifier = Modifier.weight(1f).testTag("volume_slider"),
                 colors = SliderDefaults.colors(
                     thumbColor = NeonCyan,

@@ -94,6 +94,7 @@ dependencies {
   implementation(libs.androidx.media3.session)
   // implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
+  implementation(libs.moshi.kotlin)
   // implementation(libs.firebase.ai)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)

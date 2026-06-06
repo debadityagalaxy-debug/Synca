@@ -4,7 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.connectivity.BluetoothService
+import com.example.connectivity.WifiService
 import com.example.connectivity.ConnectionState
 import com.example.connectivity.RoomMember
 import com.example.connectivity.SyncMessage
@@ -21,8 +21,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.squareup.moshi.Types
+import android.util.Base64
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "SyncRoom_ViewModel"
@@ -30,22 +35,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val database = SyncDatabase.getDatabase(application)
     private val repository = SyncRepository(database.trackDao())
 
-    val bluetoothService = BluetoothService(application)
+    val wifiService = WifiService(application)
     val audioController = AudioController(application)
 
-    // Expose database tracks
-    val tracks: StateFlow<List<Track>> = repository.allTracks
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+    private val trackListAdapter = moshi.adapter<List<Track>>(Types.newParameterizedType(List::class.java, Track::class.java))
 
-    val connectionState: StateFlow<ConnectionState> = bluetoothService.connectionState
-    val userRole: StateFlow<UserRole> = bluetoothService.role
-    val connectedMembers: StateFlow<List<RoomMember>> = bluetoothService.connectedMembers
-    val discoveredRooms: StateFlow<List<SyncRoomInfo>> = bluetoothService.discoveredRooms
-    val activeRoom: StateFlow<SyncRoomInfo?> = bluetoothService.activeRoom
+    private val _syncedTracks = MutableStateFlow<List<Track>>(emptyList())
+
+    val connectionState: StateFlow<ConnectionState> = wifiService.connectionState
+    val userRole: StateFlow<UserRole> = wifiService.role
+    val connectedMembers: StateFlow<List<RoomMember>> = wifiService.connectedMembers
+    val discoveredRooms: StateFlow<List<SyncRoomInfo>> = wifiService.discoveredRooms
+    val activeRoom: StateFlow<SyncRoomInfo?> = wifiService.activeRoom
+
+    // Expose database tracks
+    val tracks: StateFlow<List<Track>> = combine(
+        repository.allTracks,
+        _syncedTracks,
+        userRole
+    ) { localTracks, syncedTracks, role ->
+        if (role == UserRole.MEMBER) {
+            syncedTracks
+        } else {
+            localTracks
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     // Player forwarding
     val isPlaying: StateFlow<Boolean> = audioController.isPlaying
@@ -98,13 +117,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+
+        viewModelScope.launch {
+            combine(tracks, userRole, connectedMembers) { t, r, mem -> Triple(t, r, mem.size) }
+                .collectLatest { (list, role, _) ->
+                    if (role == UserRole.HOST) {
+                        try {
+                            val json = trackListAdapter.toJson(list)
+                            val b64 = Base64.encodeToString(json.toByteArray(), Base64.NO_WRAP)
+                            wifiService.broadcastMessage(SyncMessage(SyncMessage.TYPE_PLAYLIST, payload = b64))
+                        } catch (e: Exception) {
+                            Log.e("MainViewModel", "Failed to encode playlist", e)
+                        }
+                    }
+                }
+        }
     }
 
     private fun observeSyncMessages() {
         syncMessageCollectionJob = viewModelScope.launch {
-            bluetoothService.incomingMessages.collect { msg ->
+            wifiService.incomingMessages.collect { msg ->
                 val roleVal = userRole.value
                 when (msg.type) {
+                    SyncMessage.TYPE_PLAYLIST -> {
+                        if (roleVal == UserRole.MEMBER) {
+                            try {
+                                val json = String(Base64.decode(msg.payload, Base64.NO_WRAP))
+                                val list = trackListAdapter.fromJson(json) ?: emptyList()
+                                _syncedTracks.value = list
+                            } catch (e: Exception) {
+                                Log.e("MainViewModel", "Failed to parse playlist", e)
+                            }
+                        }
+                    }
                     SyncMessage.TYPE_PLAY_STATE -> {
                         // Receives dynamic play status and performs high precision delay correction
                         if (roleVal == UserRole.MEMBER) {
@@ -152,7 +197,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val trackIdx = currentTrackIndex.value
                     val pos = audioController.getExactPosition()
                     
-                    bluetoothService.broadcastMessage(SyncMessage(
+                    wifiService.broadcastMessage(SyncMessage(
                         type = SyncMessage.TYPE_PLAY_STATE,
                         payload = "$playState|$trackIdx|$pos"
                     ))
@@ -169,12 +214,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Action Triggers ---
     fun startHosting(roomName: String, password: String = "") {
-        bluetoothService.startHostRoom(roomName, password)
+        wifiService.startHostRoom(roomName, password)
         startHostPublishing()
     }
 
     fun joinSelectedRoom(room: SyncRoomInfo, password: String = "") {
-        bluetoothService.joinRoom(room, password)
+        wifiService.joinRoom(room, password)
     }
 
     fun joinRoomById(deviceId: String, password: String = "") {
@@ -185,11 +230,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             requiresPassword = password.isNotEmpty(),
             password = password
         )
-        bluetoothService.joinRoom(synthezisedRoom, password)
+        wifiService.joinRoom(synthezisedRoom, password)
     }
 
     fun exitRoom() {
-        bluetoothService.disconnect()
+        wifiService.disconnect()
         stopHostPublishing()
         audioController.stop()
     }
@@ -225,7 +270,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun triggerSeek(positionMs: Long) {
         audioController.seekTo(positionMs)
         if (userRole.value == UserRole.HOST) {
-            bluetoothService.broadcastMessage(SyncMessage(
+            wifiService.broadcastMessage(SyncMessage(
                 type = SyncMessage.TYPE_SEEK,
                 payload = "$positionMs"
             ))
@@ -235,7 +280,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun triggerVolumeChange(volValue: Float) {
         audioController.setVolume(volValue)
         if (userRole.value == UserRole.HOST) {
-            bluetoothService.broadcastMessage(SyncMessage(
+            wifiService.broadcastMessage(SyncMessage(
                 type = SyncMessage.TYPE_VOLUME,
                 payload = "$volValue"
             ))
@@ -274,7 +319,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val playState = isPlaying.value
         val trackIdx = currentTrackIndex.value
         val pos = audioController.getExactPosition()
-        bluetoothService.broadcastMessage(SyncMessage(
+        wifiService.broadcastMessage(SyncMessage(
             type = SyncMessage.TYPE_PLAY_STATE,
             payload = "$playState|$trackIdx|$pos"
         ))
@@ -285,6 +330,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         stopHostPublishing()
         syncMessageCollectionJob?.cancel()
         audioController.release()
-        bluetoothService.disconnect()
+        wifiService.disconnect()
     }
 }

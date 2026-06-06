@@ -35,11 +35,14 @@ import androidx.compose.ui.unit.sp
 import com.example.database.Track
 import com.example.ui.theme.*
 
+import com.example.connectivity.UserRole
+
 @Composable
 fun LibraryScreen(
     tracks: List<Track>,
     currentTrackIndex: Int,
     isPlaying: Boolean,
+    userRole: UserRole,
     onNavigateToTrack: (Int) -> Unit,
     onImportTrack: (String, String, String, Long) -> Unit,
     onDeleteTrack: (Track) -> Unit,
@@ -90,35 +93,37 @@ fun LibraryScreen(
                 )
             }
 
-            Button(
-                onClick = {
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        // Filter for mp3, wav, aac, flac, m4a formats
-                        type = "audio/*"
-                        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
-                            "audio/mpeg",   // MP3
-                            "audio/x-wav",  // WAV
-                            "audio/wav",    // WAV-2
-                            "audio/aac",    // AAC
-                            "audio/flac",   // FLAC
-                            "audio/mp4",    // M4A
-                            "audio/x-m4a"   // M4A-2
-                        ))
-                    }
-                    try {
-                        filePickerLauncher.launch(intent)
-                    } catch (e: Exception) {
-                        Log.e("LibraryScreen", "Failed launching file picker file list", e)
-                    }
-                },
-                modifier = Modifier.testTag("import_audio_btn"),
-                colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(Icons.Filled.Add, "Import")
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Select File")
+            if (userRole != UserRole.MEMBER) {
+                Button(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            // Filter for mp3, wav, aac, flac, m4a formats
+                            type = "audio/*"
+                            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
+                                "audio/mpeg",   // MP3
+                                "audio/x-wav",  // WAV
+                                "audio/wav",    // WAV-2
+                                "audio/aac",    // AAC
+                                "audio/flac",   // FLAC
+                                "audio/mp4",    // M4A
+                                "audio/x-m4a"   // M4A-2
+                            ))
+                        }
+                        try {
+                            filePickerLauncher.launch(intent)
+                        } catch (e: Exception) {
+                            Log.e("LibraryScreen", "Failed launching file picker file list", e)
+                        }
+                    },
+                    modifier = Modifier.testTag("import_audio_btn"),
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Filled.Add, "Import")
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Select File")
+                }
             }
         }
 
@@ -165,6 +170,7 @@ fun LibraryScreen(
                         index = index,
                         isActive = index == currentTrackIndex,
                         isPlaying = isPlaying,
+                        userRole = userRole,
                         onRowClick = { onNavigateToTrack(index) },
                         onDelete = { onDeleteTrack(track) }
                     )
@@ -180,13 +186,14 @@ fun LibraryTrackRow(
     index: Int,
     isActive: Boolean,
     isPlaying: Boolean,
+    userRole: UserRole,
     onRowClick: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onRowClick() }
+            .clickable(enabled = userRole != UserRole.MEMBER) { onRowClick() }
             .testTag("track_row_$index"),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
@@ -249,16 +256,18 @@ fun LibraryTrackRow(
                     color = if (androidx.compose.foundation.isSystemInDarkTheme()) TextSecondaryDark else TextSecondaryLight
                 )
 
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(32.dp).testTag("delete_track_btn_$index")
-                ) {
-                    Icon(
-                        Icons.Filled.Delete,
-                        contentDescription = "Delete",
-                        tint = Color.Red.copy(alpha = 0.65f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                if (userRole != UserRole.MEMBER) {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(32.dp).testTag("delete_track_btn_$index")
+                    ) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Delete",
+                            tint = Color.Red.copy(alpha = 0.65f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         }

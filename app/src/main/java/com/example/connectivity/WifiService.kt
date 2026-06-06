@@ -1,36 +1,25 @@
 package com.example.connectivity
 
-import android.annotation.SuppressLint
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothServerSocket
-import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.os.Build
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import java.io.IOException
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.IOException
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.UUID
 
-@SuppressLint("MissingPermission")
-class BluetoothService(private val context: Context) {
-    private val TAG = "SyncRoom_BTService"
-    private val APP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") // Standard Serial Port Profile SPP UUID
-
-    private val hardwareManager = BluetoothManager(context)
-    private val bluetoothAdapter: BluetoothAdapter? = hardwareManager.bluetoothAdapter
+class WifiService(private val context: Context) {
+    private val TAG = "SyncRoom_WifiService"
+    private val TCP_PORT = 8888
+    private val UDP_PORT = 8889
 
     // State flows
     private val _connectionState = MutableStateFlow(ConnectionState.IDLE)
@@ -51,60 +40,117 @@ class BluetoothService(private val context: Context) {
     private val _activeRoom = MutableStateFlow<SyncRoomInfo?>(null)
     val activeRoom: StateFlow<SyncRoomInfo?> = _activeRoom.asStateFlow()
 
-    // Threads
+    // Threads and sockets
+    private var tcpServerSocket: ServerSocket? = null
     private var acceptThread: AcceptThread? = null
     private var connectThread: ConnectThread? = null
     private val activeConnections = mutableListOf<ConnectedThread>()
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var udpBroadcastJob: Job? = null
+    private var udpListenJob: Job? = null
 
-    init {
-        // Collect hardware discovered and paired devices and map them to our Room abstraction
-        serviceScope.launch {
-            hardwareManager.discoveredDevices.collect { devices ->
-                val allDevices = (hardwareManager.getPairedDevices() + devices).distinctBy { it.macAddress }
-                _discoveredRooms.value = allDevices.map { dev ->
-                    SyncRoomInfo(
-                        id = dev.macAddress,
-                        name = "${dev.name} (${if (dev.bondState == BluetoothDevice.BOND_BONDED) "Paired" else "Discovered"})",
-                        hostName = "Device",
-                        requiresPassword = false,
-                        password = "",
-                        memberCount = 1
-                    )
-                }
-            }
-        }
-        
-        serviceScope.launch {
-            hardwareManager.connectionState.collect { state ->
-                // Sync scanning state
-                if (state == ConnectionState.SCANNING) {
-                    _connectionState.value = ConnectionState.SCANNING
-                } else if (_connectionState.value == ConnectionState.SCANNING) {
-                    _connectionState.value = ConnectionState.IDLE
-                }
-            }
-        }
-    }
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // Start room hosting
     fun startHostRoom(roomName: String, password: String = "") {
-        if (bluetoothAdapter == null) return
-        closeAllRealConnections()
+        closeAllConnections()
 
         _role.value = UserRole.HOST
         _connectionState.value = ConnectionState.ADVERTISING
         _activeRoom.value = SyncRoomInfo(
-            id = bluetoothAdapter.address ?: "bt_host",
+            id = "host_ip",
             name = roomName,
-            hostName = bluetoothAdapter.name ?: "My Host",
+            hostName = Build.MODEL,
             requiresPassword = password.isNotEmpty(),
             password = password
         )
 
-        acceptThread = AcceptThread(roomName)
+        acceptThread = AcceptThread()
         acceptThread?.start()
+
+        startUdpBroadcast(roomName)
+    }
+
+    private fun startUdpBroadcast(roomName: String) {
+        udpBroadcastJob?.cancel()
+        udpBroadcastJob = serviceScope.launch {
+            try {
+                val udpSocket = DatagramSocket()
+                udpSocket.broadcast = true
+                val broadcastAddress = InetAddress.getByName("255.255.255.255")
+                val messageStr = "SYNCROOM_WIFI|$roomName"
+                val buffer = messageStr.toByteArray()
+
+                while (isActive) {
+                    try {
+                        val packet = DatagramPacket(buffer, buffer.size, broadcastAddress, UDP_PORT)
+                        udpSocket.send(packet)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error broadcasting UDP", e)
+                    }
+                    delay(2000)
+                }
+                udpSocket.close()
+            } catch (e: Exception) {
+                 Log.e(TAG, "Failed to start UDP Broadcast", e)
+            }
+        }
+    }
+
+    fun startDiscovery() {
+        if (_connectionState.value == ConnectionState.SCANNING) return
+        _connectionState.value = ConnectionState.SCANNING
+        _discoveredRooms.value = emptyList()
+
+        udpListenJob?.cancel()
+        udpListenJob = serviceScope.launch {
+            try {
+                val udpSocket = DatagramSocket(UDP_PORT)
+                udpSocket.soTimeout = 3000
+                val buffer = ByteArray(1024)
+
+                while (isActive) {
+                    try {
+                        val packet = DatagramPacket(buffer, buffer.size)
+                        udpSocket.receive(packet)
+                        val data = String(packet.data, 0, packet.length)
+                        if (data.startsWith("SYNCROOM_WIFI|")) {
+                            val roomName = data.substringAfter("|")
+                            val senderIp = packet.address.hostAddress ?: continue
+                            
+                            val rooms = _discoveredRooms.value.toMutableList()
+                            if (rooms.none { it.id == senderIp }) {
+                                rooms.add(
+                                    SyncRoomInfo(
+                                        id = senderIp,
+                                        name = roomName,
+                                        hostName = "Wi-Fi Host",
+                                        requiresPassword = false,
+                                        password = "",
+                                        memberCount = 1
+                                    )
+                                )
+                                _discoveredRooms.value = rooms
+                            }
+                        }
+                    } catch (e: SocketTimeoutException) {
+                        // ignore timeout, just loop
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error receiving UDP", e)
+                    }
+                }
+                udpSocket.close()
+            } catch (e: Exception) {
+                 Log.e(TAG, "Failed to start UDP Listener", e)
+            }
+        }
+    }
+
+    fun stopDiscovery() {
+        udpListenJob?.cancel()
+        if (_connectionState.value == ConnectionState.SCANNING) {
+            _connectionState.value = ConnectionState.IDLE
+        }
     }
 
     fun approveMember(memberId: String) {
@@ -112,8 +158,6 @@ class BluetoothService(private val context: Context) {
             if (it.id == memberId) it.copy(isApproved = true) else it
         }
         _connectedMembers.value = current
-
-        // Send confirmation signal over protocol
         broadcastMessage(SyncMessage(SyncMessage.TYPE_JOIN_RESPONSE, payload = "APPROVED|$memberId"))
         updateRoomMemberCount()
     }
@@ -129,32 +173,32 @@ class BluetoothService(private val context: Context) {
         _activeRoom.value = _activeRoom.value?.copy(memberCount = approvedCount)
     }
 
-    // Join room
     fun joinRoom(room: SyncRoomInfo, providedPassword: String = "") {
-        if (bluetoothAdapter == null) return
-        closeAllRealConnections()
-
-        hardwareManager.stopDiscovery()
+        closeAllConnections()
+        stopDiscovery()
 
         _role.value = UserRole.MEMBER
         _connectionState.value = ConnectionState.CONNECTING
         _activeRoom.value = room
 
-        val device = bluetoothAdapter.getRemoteDevice(room.id)
-        connectThread = ConnectThread(device)
+        connectThread = ConnectThread(room.id)
         connectThread?.start()
     }
 
-    // Shutdown structures cleanly
     fun disconnect() {
-        closeAllRealConnections()
+        closeAllConnections()
         _role.value = UserRole.NONE
         _connectionState.value = ConnectionState.IDLE
         _activeRoom.value = null
         _connectedMembers.value = emptyList()
     }
 
-    private fun closeAllRealConnections() {
+    private fun closeAllConnections() {
+        udpBroadcastJob?.cancel()
+        udpListenJob?.cancel()
+        try {
+            tcpServerSocket?.close()
+        } catch (e: Exception) {}
         try {
             acceptThread?.cancel()
             acceptThread = null
@@ -169,7 +213,6 @@ class BluetoothService(private val context: Context) {
         }
     }
 
-    // Messaging pipeline
     fun broadcastMessage(message: SyncMessage) {
         val dataStr = "${message.type}|${message.timestamp}|${message.payload}\n"
         synchronized(activeConnections) {
@@ -179,57 +222,45 @@ class BluetoothService(private val context: Context) {
         }
     }
 
-    fun startDiscovery() {
-        hardwareManager.startDiscovery()
-    }
-
-    fun stopDiscovery() {
-        hardwareManager.stopDiscovery()
-    }
-
-    // --- AcceptThread: Server Socket Listener ---
-    private inner class AcceptThread(roomName: String) : Thread() {
-        private val mmServerSocket: BluetoothServerSocket? by lazy(LazyThreadSafetyMode.NONE) {
-            bluetoothAdapter?.listenUsingInsecureRfcommWithServiceRecord(roomName, APP_UUID)
-        }
-
+    private inner class AcceptThread : Thread() {
         override fun run() {
-            var shouldLoop = true
-            while (shouldLoop) {
-                val socket: BluetoothSocket? = try {
-                    mmServerSocket?.accept()
-                } catch (e: IOException) {
-                    Log.e(TAG, "Socket Server accept() failed", e)
-                    shouldLoop = false
-                    null
+            try {
+                tcpServerSocket = ServerSocket(TCP_PORT)
+                tcpServerSocket?.reuseAddress = true
+                var shouldLoop = true
+                while (shouldLoop) {
+                    val socket: Socket? = try {
+                        tcpServerSocket?.accept()
+                    } catch (e: IOException) {
+                        Log.e(TAG, "Socket Server accept() failed", e)
+                        shouldLoop = false
+                        null
+                    }
+                    socket?.let {
+                        manageConnectedSocket(it)
+                    }
                 }
-                socket?.let {
-                    manageConnectedSocket(it)
-                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Could not start server socket", e)
             }
         }
 
         fun cancel() {
             try {
-                mmServerSocket?.close()
+                tcpServerSocket?.close()
             } catch (e: IOException) {
                 Log.e(TAG, "Socket Server close() failed", e)
             }
         }
     }
 
-    // --- ConnectThread: Client Connection ---
-    private inner class ConnectThread(private val device: BluetoothDevice) : Thread() {
-        private val mmSocket: BluetoothSocket? by lazy(LazyThreadSafetyMode.NONE) {
-            device.createInsecureRfcommSocketToServiceRecord(APP_UUID)
-        }
+    private inner class ConnectThread(private val hostIp: String) : Thread() {
+        private var mmSocket: Socket? = null
 
         override fun run() {
-            bluetoothAdapter?.cancelDiscovery()
-
             try {
+                mmSocket = Socket(hostIp, TCP_PORT)
                 mmSocket?.let { socket ->
-                    socket.connect()
                     manageConnectedSocket(socket)
                 }
             } catch (e: IOException) {
@@ -237,22 +268,18 @@ class BluetoothService(private val context: Context) {
                 _connectionState.value = ConnectionState.DISCONNECTED
                 try {
                     mmSocket?.close()
-                } catch (closeException: IOException) {
-                    Log.e(TAG, "Could not close client socket", closeException)
-                }
+                } catch (closeException: IOException) { }
             }
         }
 
         fun cancel() {
             try {
                 mmSocket?.close()
-            } catch (e: IOException) {
-                Log.e(TAG, "Could not close client socket", e)
-            }
+            } catch (e: IOException) { }
         }
     }
 
-    private fun manageConnectedSocket(socket: BluetoothSocket) {
+    private fun manageConnectedSocket(socket: Socket) {
         val connectedThread = ConnectedThread(socket)
         synchronized(activeConnections) {
             activeConnections.add(connectedThread)
@@ -260,9 +287,8 @@ class BluetoothService(private val context: Context) {
         connectedThread.start()
         _connectionState.value = ConnectionState.CONNECTED
 
-        // Welcome new user
-        val deviceName = socket.remoteDevice.name ?: "Unknown Peer"
-        val deviceId = socket.remoteDevice.address ?: UUID.randomUUID().toString()
+        val deviceName = "Peer"
+        val deviceId = socket.inetAddress?.hostAddress ?: UUID.randomUUID().toString()
         
         if (_role.value == UserRole.HOST) {
             serviceScope.launch {
@@ -276,7 +302,6 @@ class BluetoothService(private val context: Context) {
                 }
             }
         } else {
-            // Member side
             serviceScope.launch {
                 _connectedMembers.value = listOf(
                     RoomMember("host_id", _activeRoom.value?.hostName ?: "Host", isApproved = true, isHost = true),
@@ -286,10 +311,9 @@ class BluetoothService(private val context: Context) {
         }
     }
 
-    // --- ConnectedThread: Handles Active Comm Channel ---
-    private inner class ConnectedThread(private val socket: BluetoothSocket) : Thread() {
-        private val mmInStream: InputStream = socket.inputStream
-        private val mmOutStream: OutputStream = socket.outputStream
+    private inner class ConnectedThread(private val socket: Socket) : Thread() {
+        private val mmInStream: InputStream = socket.getInputStream()
+        private val mmOutStream: OutputStream = socket.getOutputStream()
         private val mmBuffer = ByteArray(1024)
 
         override fun run() {
@@ -298,6 +322,11 @@ class BluetoothService(private val context: Context) {
                     mmInStream.read(mmBuffer)
                 } catch (e: IOException) {
                     Log.d(TAG, "Input stream was disconnected", e)
+                    handleDisconnect(socket)
+                    break
+                }
+
+                if (numBytes == -1) {
                     handleDisconnect(socket)
                     break
                 }
@@ -318,23 +347,20 @@ class BluetoothService(private val context: Context) {
         fun cancel() {
             try {
                 socket.close()
-            } catch (e: IOException) {
-                Log.e(TAG, "Could not close the connect socket", e)
-            }
+            } catch (e: IOException) {}
         }
     }
 
-    private fun handleDisconnect(socket: BluetoothSocket) {
+    private fun handleDisconnect(socket: Socket) {
         synchronized(activeConnections) {
             activeConnections.removeAll { it == Thread.currentThread() }
         }
-        val deviceId = socket.remoteDevice?.address ?: ""
+        val deviceId = socket.inetAddress?.hostAddress ?: ""
         _connectedMembers.value = _connectedMembers.value.filter { it.id != deviceId }
         updateRoomMemberCount()
 
         if (_role.value == UserRole.MEMBER && activeConnections.isEmpty()) {
             _connectionState.value = ConnectionState.DISCONNECTED
-            // Trigger automatic retry/reconnection
             serviceScope.launch {
                 delay(3000)
                 if (_connectionState.value == ConnectionState.DISCONNECTED && _activeRoom.value != null) {
@@ -361,3 +387,4 @@ class BluetoothService(private val context: Context) {
         }
     }
 }
+

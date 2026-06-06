@@ -192,7 +192,7 @@ fun RoomScreen(
 
             if (discoveredRooms.isEmpty()) {
                 item {
-                    val message = "No Bluetooth streams detected. Confirm dynamic permissions are enabled."
+                    val message = "No Wi-Fi streams detected. Confirm you are on the same Hotspot or Network."
                     EmptyRoomsState(message)
                 }
             } else {
@@ -267,7 +267,7 @@ fun EmptyRoomsState(message: String) {
             modifier = Modifier.padding(16.dp)
         ) {
             Icon(
-                Icons.Outlined.BluetoothSearching,
+                Icons.Outlined.WifiTethering,
                 contentDescription = null,
                 tint = NeonPurple.copy(alpha = 0.7f),
                 modifier = Modifier.size(36.dp)
